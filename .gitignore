@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+.env
+*.egg-info/
+.eggs/
+
+# 秘密を含む環境変数ファイル（例はコミット可）
+env.yaml
+
+# IDE / OS
+.idea/
+.DS_Store
+*.swp
+*.swo
