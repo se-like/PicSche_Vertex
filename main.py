@@ -1,6 +1,9 @@
 import os
 import json
+import logging
 from fastapi import FastAPI, HTTPException, Header, Request
+
+logger = logging.getLogger(__name__)
 
 # 環境変数: Cloud Run で設定する
 PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
@@ -143,6 +146,21 @@ def call_vertex(image_base64: str, prompt: str) -> str:
 
     with urllib.request.urlopen(req, timeout=120) as res:
         result = json.loads(res.read().decode())
+
+    usage = result.get("usageMetadata") or result.get("usage_metadata", {})
+    input_tokens = usage.get("promptTokenCount") or usage.get("prompt_token_count") or 0
+    output_tokens = usage.get("candidatesTokenCount") or usage.get("candidates_token_count") or 0
+    thoughts_tokens = usage.get("thoughtsTokenCount") or usage.get("thoughts_token_count") or 0
+    total_tokens = usage.get("totalTokenCount") or usage.get("total_token_count") or 0
+    logger.info(
+        "[Vertex AI] Token usage - Input: %s, Output: %s, Thoughts: %s, Total: %s",
+        input_tokens, output_tokens, thoughts_tokens, total_tokens,
+    )
+    print(
+        f"[Vertex AI] Token usage - Input: {input_tokens}, Output: {output_tokens}, "
+        f"Thoughts: {thoughts_tokens}, Total: {total_tokens}"
+    )
+
     candidates = result.get("candidates", [])
     if not candidates:
         raise ValueError("No candidates in response")
