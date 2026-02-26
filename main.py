@@ -10,14 +10,13 @@ logger = logging.getLogger(__name__)
 
 
 def _ensure_firebase_app():
-    """Firebase Admin SDK を一度だけ初期化する（GCP 環境の ADC を使用）。"""
-    try:
-        firebase_admin.get_app()
-    except ValueError:
-        opts = {}
-        if PROJECT_ID := os.environ.get("GOOGLE_CLOUD_PROJECT", ""):
-            opts["project_id"] = PROJECT_ID
-        firebase_admin.initialize_app(**opts)
+    """Firebase Admin SDK を一度だけ初期化する。App Check トークンは Firebase プロジェクトが発行するため、FIREBASE_PROJECT_ID が設定されていればそれを使う。"""
+    if len(firebase_admin._apps) > 0:
+        return
+    # Python SDK では options 辞書で projectId（camelCase）を渡す
+    firebase_project = os.environ.get("FIREBASE_PROJECT_ID", "").strip() or os.environ.get("GOOGLE_CLOUD_PROJECT", "").strip()
+    options = {"projectId": firebase_project} if firebase_project else None
+    firebase_admin.initialize_app(options=options)
 
 
 def verify_app_check_token(request: Request) -> None:
@@ -47,6 +46,17 @@ MODEL_ID = os.environ.get("VERTEX_MODEL", "gemini-2.0-flash")
 BACKEND_API_KEY = os.environ.get("PICSCHE_BACKEND_API_KEY", "")
 
 app = FastAPI()
+
+
+@app.on_event("startup")
+def _startup():
+    """起動時に Firebase Admin を初期化する。失敗してもプロセスは続行（初回リクエストで再試行）。"""
+    try:
+        _ensure_firebase_app()
+        logger.info("[Startup] Firebase Admin initialized")
+    except Exception as e:
+        logger.warning("[Startup] Firebase Admin init skipped: %s", e, exc_info=True)
+
 
 # === 無料プラン利用回数（Firestore）===
 from datetime import datetime
@@ -223,6 +233,7 @@ async def extract(
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception("[extract] %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
