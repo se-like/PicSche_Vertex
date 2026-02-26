@@ -1,9 +1,43 @@
 import os
 import json
 import logging
-from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi import FastAPI, HTTPException, Header, Request, Depends
+
+import firebase_admin
+from firebase_admin import app_check
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_firebase_app():
+    """Firebase Admin SDK を一度だけ初期化する（GCP 環境の ADC を使用）。"""
+    try:
+        firebase_admin.get_app()
+    except ValueError:
+        opts = {}
+        if PROJECT_ID := os.environ.get("GOOGLE_CLOUD_PROJECT", ""):
+            opts["project_id"] = PROJECT_ID
+        firebase_admin.initialize_app(**opts)
+
+
+def verify_app_check_token(request: Request) -> None:
+    """
+    X-Firebase-AppCheck ヘッダーのトークンを検証する。
+    トークンが無い、または検証に失敗した場合は HTTP 401 を返し、以降の処理をブロックする。
+    """
+    _ensure_firebase_app()
+    token = request.headers.get("X-Firebase-AppCheck", "").strip()
+    if not token:
+        logger.warning("[App Check] Missing X-Firebase-AppCheck header")
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        app_check.verify_token(token)
+    except ValueError as e:
+        logger.warning("[App Check] Token verification failed: %s", e)
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    except Exception as e:
+        logger.exception("[App Check] Unexpected error during verification: %s", e)
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 # 環境変数: Cloud Run で設定する
 PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
@@ -171,7 +205,11 @@ def call_vertex(image_base64: str, prompt: str) -> str:
 
 
 @app.post("/extract")
-async def extract(request: Request, x_api_key: str = Header(None)):
+async def extract(
+    request: Request,
+    x_api_key: str = Header(None),
+    _: None = Depends(verify_app_check_token),
+):
     if BACKEND_API_KEY and x_api_key != BACKEND_API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
     try:
